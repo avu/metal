@@ -9,11 +9,12 @@ execute_process(COMMAND xcode-select -p
 
 set(xcode_usr_bin ${xcode_path}/Platforms/MacOSX.platform/usr/bin)
 FIND_LIBRARY(APPKIT_LIBRARY AppKit)
-set(SOURCE_FILES src/main.mm src/RenderObject.cpp src/RenderObject.h src/VertexBuffer.cpp src/VertexBuffer.h src/MetalVertexBuffer.mm src/MetalVertexBuffer.h)
+set(SOURCE_FILES src/camain.mm src/RenderObject.cpp src/RenderObject.h src/VertexBuffer.cpp src/VertexBuffer.h src/MetalVertexBuffer.mm src/MetalVertexBuffer.h)
 add_executable(metal ${SOURCE_FILES} ${PROJECT_BINARY_DIR}/shaders.metallib_)
 
 target_link_libraries(metal ${APPKIT_LIBRARY})
 target_link_libraries(metal "-framework Cocoa")
+target_link_libraries(metal "-framework QuartzCore")
 target_link_libraries(metal "-framework Metal")
 target_link_libraries(metal "-framework MetalKit")
 add_custom_command(
