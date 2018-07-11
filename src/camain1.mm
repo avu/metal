@@ -1,25 +1,4 @@
-#import <Cocoa/Cocoa.h>
-#import <Metal/Metal.h>
-#import <MetalKit/MetalKit.h>
-#import "common.h"
-#include "VertexBuffer.h"
-#import <GLKit/GLKMath.h>
-
-constexpr int W = 800;
-constexpr int H = 800;
-constexpr int R = 50;
-constexpr int C = 1000;
-
-@interface HelloMetalRenderer : NSObject
-- (id)initWithLayer:(CAMetalLayer *)layer;
-- (void)setup:(CAMetalLayer *)layer;
-@end
-
-
-@interface MyView : NSView
-- (CALayer *)makeBackingLayer;
-@end
-static const float GlobalQuadVertices[6][4] =
+static const r32 GlobalQuadVertices[6][4] =
         {
                 { -1.0f,  -1.0f, 0.0f, 1.0f },
                 {  1.0f,  -1.0f, 0.0f, 1.0f },
@@ -29,7 +8,7 @@ static const float GlobalQuadVertices[6][4] =
                 { -1.0f,   1.0f, 0.0f, 1.0f },
                 {  1.0f,   1.0f, 0.0f, 1.0f }
         };
-static const float GlobalQuadTexCoords[6][2] =
+static const r32 GlobalQuadTexCoords[6][2] =
         {
                 { 0.0f, 0.0f },
                 { 1.0f, 0.0f },
@@ -49,7 +28,7 @@ static const float GlobalQuadTexCoords[6][2] =
     CVDisplayLinkRef	  	    _displayLink;
     dispatch_semaphore_t 	    _renderSemaphore;
 
-    CAMetalLayer 	   *_metalLayer;
+    __weak CAMetalLayer 	   *_metalLayer;
 
     MTLRenderPassDescriptor    *_renderPassDesc;
     id<MTLDevice> 			    _device;
@@ -75,10 +54,10 @@ static CVReturn OnDisplayLinkFrame(CVDisplayLinkRef displayLink,
 {
     OSXMetalView *view = (__bridge OSXMetalView *)displayLinkContext;
 
-  //  @autoreleasepool
-  //  {
+    @autoreleasepool
+    {
         [view update];
-  //  }
+    }
 
     return kCVReturnSuccess;
 }
@@ -177,7 +156,7 @@ static CVReturn OnDisplayLinkFrame(CVDisplayLinkRef displayLink,
         }
 
         _vertexBuffer = [_device newBufferWithBytes:GlobalQuadVertices
-                                             length:6 * sizeof(float) * 4
+                                             length:6 * sizeof(r32) * 4
                                             options:MTLResourceOptionCPUCacheModeDefault];
         if (!_vertexBuffer)
         {
@@ -187,7 +166,7 @@ static CVReturn OnDisplayLinkFrame(CVDisplayLinkRef displayLink,
         _vertexBuffer.label = @"quad vertices";
 
         _texCoordBuffer = [_device newBufferWithBytes:GlobalQuadTexCoords
-                                               length:6 * sizeof(float) * 2
+                                               length:6 * sizeof(r32) * 2
                                               options:MTLResourceOptionCPUCacheModeDefault];
         if (!_texCoordBuffer)
         {
@@ -199,13 +178,13 @@ static CVReturn OnDisplayLinkFrame(CVDisplayLinkRef displayLink,
         _pixels = (char*)malloc(4 * frame.size.width * frame.size.height);
         char *pixelIterator = _pixels;
 
-        for (int y = 0; y < frame.size.height; ++y)
+        for (u32 y = 0; y < frame.size.height; ++y)
         {
-            for (int x = 0; x < frame.size.width; ++x)
+            for (u32 x = 0; x < frame.size.width; ++x)
             {
+                *pixelIterator++ = 255;
                 *pixelIterator++ = 0;
-                *pixelIterator++ = 0;
-                *pixelIterator++ = 155;
+                *pixelIterator++ = 255;
                 *pixelIterator++ = 255;
             }
         }
@@ -214,11 +193,11 @@ static CVReturn OnDisplayLinkFrame(CVDisplayLinkRef displayLink,
 
         CVReturn cvReturn = CVDisplayLinkCreateWithActiveCGDisplays(&_displayLink);
 
-   //     Assert(cvReturn == kCVReturnSuccess);
+        Assert(cvReturn == kCVReturnSuccess);
 
         cvReturn = CVDisplayLinkSetOutputCallback(_displayLink, &OnDisplayLinkFrame, (__bridge void *)self);
 
-   //     Assert(cvReturn == kCVReturnSuccess);
+        Assert(cvReturn == kCVReturnSuccess);
 
         cvReturn = CVDisplayLinkSetCurrentCGDisplay(_displayLink, CGMainDisplayID());
 
@@ -300,7 +279,7 @@ static CVReturn OnDisplayLinkFrame(CVDisplayLinkRef displayLink,
     }
 
     MTLRegion region = MTLRegionMake2D(0, 0, self.frame.size.width, self.frame.size.height);
-    int rowBytes = self.frame.size.width * 4;
+    u32 rowBytes = self.frame.size.width * 4;
     [_texture replaceRegion:region
                 mipmapLevel:0
                   withBytes:_pixels
@@ -354,198 +333,4 @@ static CVReturn OnDisplayLinkFrame(CVDisplayLinkRef displayLink,
     }
 }
 
-@end
-
-constexpr int uniformBufferCount = 3;
-constexpr int N = 32;
-
-struct Object {
-    Vertex* verts;
-    int s;
-    int n;
-    float ox, oy;
-    float vx, vy;
-    unsigned char c1[4];
-    unsigned char c2[4];
-};
-
-typedef struct {
-    GLKVector2 position;
-}Triangle;
-
-Object objs[C];
-VertexBuffer* vertexBuffer;
-HelloMetalRenderer* renderer;
-int main () {
-    @autoreleasepool {
-        [NSApplication sharedApplication];
-        [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
-
-        NSRect frame = NSMakeRect(0, 0, W, H);
-        NSWindow* window = [[NSWindow alloc]
-                               initWithContentRect:frame styleMask:NSTitledWindowMask
-                               backing:NSBackingStoreBuffered defer:NO];
-        [window cascadeTopLeftFromPoint:NSMakePoint(20,20)];
-        window.title = [[NSProcessInfo processInfo] processName];
-        // Custom MTKView.
-        OSXMetalView* view = [[OSXMetalView alloc] initWithFrame:frame];
-        window.contentView = view;
-
-
-        //CAMetalLayer *rootLayer = [[CAMetalLayer alloc] init];
-        //renderer = [[HelloMetalRenderer alloc] initWithLayer:nil andView:view];
-
-
-        view.needsDisplay = YES;
-        //[self draw];
-
-        [window makeKeyAndOrderFront:nil];
-
-        [NSApp activateIgnoringOtherApps:YES];
-        // Run.
-        [NSApp run];
-    }
-    return 0;
-}
-
-// The main view.
-@implementation HelloMetalRenderer {
-    id <MTLDevice> mtlDevice;
-    id <MTLCommandQueue> mtlCommandQueue;
-    MTLRenderPassDescriptor *mtlRenderPassDescriptor;
-    CAMetalLayer *metalLayer;
-    id <CAMetalDrawable> frameDrawable;
-    NSView* _view;
-    NSTimer* timer;
-    MTLRenderPipelineDescriptor *renderPipelineDescriptor;
-    id <MTLRenderPipelineState> renderPipelineState;
-    id <MTLBuffer> object;
-    dispatch_semaphore_t _semaphore;
-    CVDisplayLinkRef displayLink;
-}
-
-- (id)initWithLayer:(CAMetalLayer *)layer andView:(NSView*)view{
-    _view = view;
-    self = [super init];
-    if (self) {
-        [self setup:layer andView:view];
-    }
-    return self;
-}
-
-- (void)setup:(CAMetalLayer *)layer andView:(NSView*)view {
-    // Set view settings.
-    CVDisplayLinkCreateWithActiveCGDisplays(&displayLink);
-    metalLayer  = view.layer;
-    mtlDevice = MTLCreateSystemDefaultDevice();
-    mtlCommandQueue = [mtlDevice newCommandQueue];
-
-    [metalLayer setDevice:mtlDevice];
-    [metalLayer setPixelFormat:MTLPixelFormatBGRA8Unorm];
-    metalLayer.framebufferOnly = YES;
-    [metalLayer setFrame:_view.layer.frame];
-
-    [_view.layer addSublayer:metalLayer];
-
-    [_view setOpaque:YES];
-    [_view setBackgroundColor:nil];
-    [_view setWantsLayer:YES];
-
-    // Load shaders.
-    NSError *error = nil;
-    id <MTLLibrary> _library = [mtlDevice newLibraryWithFile: @"shaders.metallib" error:&error];
-    if (!_library) {
-        NSLog(@"Failed to load library. error %@", error);
-        exit(0);
-    }
-
-    // Create depth state.
-    MTLDepthStencilDescriptor *depthDesc = [MTLDepthStencilDescriptor new];
-    depthDesc.depthCompareFunction = MTLCompareFunctionLess;
-    depthDesc.depthWriteEnabled = YES;
-
-
-    // Create a reusable pipeline
-    renderPipelineDescriptor = [MTLRenderPipelineDescriptor new];
-    renderPipelineDescriptor.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
-
-    renderPipelineDescriptor.vertexFunction = [_library newFunctionWithName:@"vert"];
-    renderPipelineDescriptor.fragmentFunction = [_library newFunctionWithName:@"frag"];
-    renderPipelineState = [mtlDevice newRenderPipelineStateWithDescriptor:renderPipelineDescriptor error: nil];
-
-    Triangle triangle[3] = { { -.5f, 0.0f }, { 0.5f, 0.0f }, { 0.0f, 0.5f } };
-
-    object = [mtlDevice newBufferWithBytes:&triangle length:sizeof(Triangle[3]) options:MTLResourceOptionCPUCacheModeDefault];
-    // Create vertex descriptor.
-    MTLVertexDescriptor *vertDesc = [MTLVertexDescriptor new];
-    vertDesc.attributes[VertexAttributePosition].format = MTLVertexFormatFloat3;
-    vertDesc.attributes[VertexAttributePosition].offset = 0;
-    vertDesc.attributes[VertexAttributePosition].bufferIndex = MeshVertexBuffer;
-    vertDesc.attributes[VertexAttributeColor].format = MTLVertexFormatUChar4;
-    vertDesc.attributes[VertexAttributeColor].offset = sizeof(Vertex::position);
-    vertDesc.attributes[VertexAttributeColor].bufferIndex = MeshVertexBuffer;
-    vertDesc.layouts[MeshVertexBuffer].stride = sizeof(Vertex);
-    vertDesc.layouts[MeshVertexBuffer].stepRate = 1;
-    vertDesc.layouts[MeshVertexBuffer].stepFunction = MTLVertexStepFunctionPerVertex;
-    CVDisplayLinkSetOutputCallback(displayLink, &MyDisplayLinkCallback, self);
-    _semaphore = dispatch_semaphore_create(uniformBufferCount);
-
-/*    timer = [NSTimer scheduledTimerWithTimeInterval:1
-                                             target:self
-                                           selector:@selector(render)
-                                           userInfo:nil
-                                            repeats:YES];
-*/
-    CVDisplayLinkStart(displayLink);
-}
-
--(void) render {
-    NSLog(@"aaaa\n");
-    @autoreleasepool {
-        dispatch_semaphore_wait(_semaphore, DISPATCH_TIME_FOREVER);
-
-        id <MTLCommandBuffer> mtlCommandBuffer = [mtlCommandQueue commandBuffer];
-
-        if (frameDrawable = [metalLayer nextDrawable]) {
-            if (!mtlRenderPassDescriptor)
-                mtlRenderPassDescriptor = [MTLRenderPassDescriptor new];
-
-            mtlRenderPassDescriptor.colorAttachments[0].texture = frameDrawable.texture;
-            mtlRenderPassDescriptor.colorAttachments[0].loadAction = MTLLoadActionClear;
-            mtlRenderPassDescriptor.colorAttachments[0].clearColor = MTLClearColorMake(0.75, 0.25, 1.0, 1.0);
-            mtlRenderPassDescriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
-
-            id <MTLRenderCommandEncoder> renderCommand = [mtlCommandBuffer renderCommandEncoderWithDescriptor:mtlRenderPassDescriptor];
-            // Draw objects here
-            // set MTLRenderPipelineState..
-            [renderCommand endEncoding];
-            __block dispatch_semaphore_t semaphore = _semaphore;
-            [mtlCommandBuffer addCompletedHandler:^(id <MTLCommandBuffer> buffer) {
-                dispatch_semaphore_signal(semaphore);
-            }];
-            [mtlCommandBuffer presentDrawable:frameDrawable];
-            [mtlCommandBuffer commit];
-            mtlRenderPassDescriptor = nil;
-            frameDrawable = nil;
-        }
-    }
-}
-
-// This is the renderer output callback function
-static CVReturn MyDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTimeStamp* now, const CVTimeStamp* outputTime, CVOptionFlags flagsIn, CVOptionFlags* flagsOut, void* displayLinkContext)
-{
-    [(HelloMetalRenderer*)displayLinkContext render];
-    return kCVReturnSuccess;
-}
-
-
-@end
-
-@implementation MyView {
-
-}
-
-- (CALayer *)makeBackingLayer {
-    return [CAMetalLayer layer];
-}
 @end

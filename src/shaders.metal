@@ -1,27 +1,32 @@
-#include <simd/simd.h>
-#include "common.h"
+#include <metal_graphics>
+#include <metal_geometric>
+#include <metal_texture>
 
 using namespace metal;
 
-struct VertexInput {
-    float3 position [[attribute(VertexAttributePosition)]];
-    half4 color [[attribute(VertexAttributeColor)]];
+struct VertexInOut
+{
+    float4 pos [[position]];
+    float2 texCoord [[user(texturecoord)]];
 };
 
-struct ShaderInOut {
-    float4 position [[position]];
-    half4  color;
-};
+vertex VertexInOut TexturedQuadVertex(constant float4         *pos        [[ buffer(0) ]],
+        constant packed_float2  *texCoords  [[ buffer(1) ]],
+        uint                     vid        [[ vertex_id ]])
+{
+VertexInOut outVertices;
 
-vertex ShaderInOut vert(VertexInput in [[stage_in]],
-	   constant FrameUniforms& uniforms [[buffer(FrameUniformBuffer)]]) {
-    ShaderInOut out;
-    float4 pos4 = float4(in.position, 1.0);
-    out.position = uniforms.projectionViewModel * pos4;
-    out.color = in.color / 255.0;
-    return out;
+outVertices.pos      = pos[vid];
+outVertices.texCoord = texCoords[vid];
+
+return outVertices;
 }
 
-fragment half4 frag(ShaderInOut in [[stage_in]]) {
-    return in.color;
+fragment half4 TexturedQuadFragment(VertexInOut      inFrag    [[ stage_in ]],
+texture2d<half>  tex2D     [[ texture(0) ]])
+{
+constexpr sampler quadSampler;
+half4 color = tex2D.sample(quadSampler, inFrag.texCoord);
+
+return color;
 }
