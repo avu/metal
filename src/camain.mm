@@ -3,6 +3,7 @@
 #import <MetalKit/MetalKit.h>
 #import "common.h"
 #include "VertexBuffer.h"
+#import <GLKit/GLKMath.h>
 
 constexpr int W = 800;
 constexpr int H = 800;
@@ -12,6 +13,347 @@ constexpr int C = 1000;
 @interface HelloMetalRenderer : NSObject
 - (id)initWithLayer:(CAMetalLayer *)layer;
 - (void)setup:(CAMetalLayer *)layer;
+@end
+
+
+@interface MyView : NSView
+- (CALayer *)makeBackingLayer;
+@end
+static const float GlobalQuadVertices[6][4] =
+        {
+                { -1.0f,  -1.0f, 0.0f, 1.0f },
+                {  1.0f,  -1.0f, 0.0f, 1.0f },
+                { -1.0f,   1.0f, 0.0f, 1.0f },
+
+                {  1.0f,  -1.0f, 0.0f, 1.0f },
+                { -1.0f,   1.0f, 0.0f, 1.0f },
+                {  1.0f,   1.0f, 0.0f, 1.0f }
+        };
+static const float GlobalQuadTexCoords[6][2] =
+        {
+                { 0.0f, 0.0f },
+                { 1.0f, 0.0f },
+                { 0.0f, 1.0f },
+
+                { 1.0f, 0.0f },
+                { 0.0f, 1.0f },
+                { 1.0f, 1.0f }
+        };
+
+@interface OSXMetalView : NSView
+@end
+
+@implementation OSXMetalView
+{
+@public
+    CVDisplayLinkRef	  	    _displayLink;
+    dispatch_semaphore_t 	    _renderSemaphore;
+
+    CAMetalLayer 	   *_metalLayer;
+
+    MTLRenderPassDescriptor    *_renderPassDesc;
+    id<MTLDevice> 			    _device;
+    id<MTLCommandQueue>        _commandQueue;
+    id<MTLLibrary>             _shaderLibrary;
+    id<MTLRenderPipelineState> _pipelineState;
+    id<MTLDepthStencilState>   _depthState;
+    id<MTLTexture>  	       _texture;
+    id<MTLBuffer>  			   _vertexBuffer;
+    id<MTLBuffer>  			   _texCoordBuffer;
+    id<CAMetalDrawable> 	   _currentDrawable;
+
+    BOOL 				        _layerSizeDidUpdate;
+    char 					   *_pixels;
+}
+
+static CVReturn OnDisplayLinkFrame(CVDisplayLinkRef displayLink,
+                                   const CVTimeStamp *now,
+                                   const CVTimeStamp *outputTime,
+                                   CVOptionFlags flagsIn,
+                                   CVOptionFlags *flagsOut,
+                                   void *displayLinkContext)
+{
+    OSXMetalView *view = (__bridge OSXMetalView *)displayLinkContext;
+
+    @autoreleasepool
+    {
+        [view update];
+    }
+
+    return kCVReturnSuccess;
+}
+
++ (Class)layerClass
+{
+    return [CAMetalLayer class];
+}
+
+- (id)initWithFrame:(CGRect)frame
+{
+    self = [super initWithFrame:frame];
+
+    if (self)
+    {
+        self.wantsLayer = YES;
+        self.layer = _metalLayer = [CAMetalLayer layer];
+
+        _device = MTLCreateSystemDefaultDevice();
+
+        _metalLayer.device          = _device;
+        _metalLayer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+
+        _metalLayer.framebufferOnly = YES;
+
+        _commandQueue = [_device newCommandQueue];
+        if (!_commandQueue)
+        {
+            printf("ERROR: Couldn't create a command queue.");
+            return nil;
+        }
+
+        NSError *error = nil;
+
+        _shaderLibrary = [_device newLibraryWithFile: @"shaders.metallib" error:&error];
+        if (!_shaderLibrary)
+        {
+            printf("ERROR: Failed to load shader library.");
+            return nil;
+        }
+
+        id<MTLFunction> fragmentProgram = [_shaderLibrary newFunctionWithName:@"frag"];
+        if (!fragmentProgram)
+        {
+            printf("ERROR: Couldn't load fragment function from default library.");
+            return nil;
+        }
+
+        id<MTLFunction> vertexProgram = [_shaderLibrary newFunctionWithName:@"vert"];
+        if (!vertexProgram)
+        {
+            printf("ERROR: Couldn't load vertex function from default library.");
+            return nil;
+        }
+
+        MTLRenderPipelineDescriptor *pipelineStateDesc = [MTLRenderPipelineDescriptor new];
+
+        if (!pipelineStateDesc)
+        {
+            printf("ERROR: Failed creating a pipeline state descriptor!");
+            return nil;
+        }
+
+        pipelineStateDesc.depthAttachmentPixelFormat      = MTLPixelFormatInvalid;
+        pipelineStateDesc.stencilAttachmentPixelFormat    = MTLPixelFormatInvalid;
+        pipelineStateDesc.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+
+        pipelineStateDesc.sampleCount      = 1;
+        pipelineStateDesc.vertexFunction   = vertexProgram;
+        pipelineStateDesc.fragmentFunction = fragmentProgram;
+
+        _pipelineState = [_device newRenderPipelineStateWithDescriptor:pipelineStateDesc
+                                                                 error:&error];
+        if (!_pipelineState)
+        {
+            printf("ERROR: Failed acquiring pipeline state descriptor.");
+            return nil;
+        }
+
+        MTLTextureDescriptor *texDesc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+                                                                                           width:frame.size.width
+                                                                                          height:frame.size.height
+                                                                                       mipmapped:NO];
+        if (!texDesc)
+        {
+            printf("ERROR: Failed to create texture descriptor.");
+            return nil;
+        }
+
+        _texture = [_device newTextureWithDescriptor:texDesc];
+
+        if (!_texture)
+        {
+            printf("ERROR: Failed to create texture.");
+            return nil;
+        }
+
+        _vertexBuffer = [_device newBufferWithBytes:GlobalQuadVertices
+                                             length:6 * sizeof(float) * 4
+                                            options:MTLResourceOptionCPUCacheModeDefault];
+        if (!_vertexBuffer)
+        {
+            printf("ERROR: Failed to create quad vertex buffer.");
+            return nil;
+        }
+        _vertexBuffer.label = @"quad vertices";
+
+        _texCoordBuffer = [_device newBufferWithBytes:GlobalQuadTexCoords
+                                               length:6 * sizeof(float) * 2
+                                              options:MTLResourceOptionCPUCacheModeDefault];
+        if (!_texCoordBuffer)
+        {
+            printf("ERROR: Failed to create 2d texture coordinate buffer.");
+            return nil;
+        }
+        _texCoordBuffer.label = @"quad texcoords";
+
+        _pixels = (char*)malloc(4 * frame.size.width * frame.size.height);
+        char *pixelIterator = _pixels;
+
+        for (int y = 0; y < frame.size.height; ++y)
+        {
+            for (int x = 0; x < frame.size.width; ++x)
+            {
+                *pixelIterator++ = 255;
+                *pixelIterator++ = 0;
+                *pixelIterator++ = 255;
+                *pixelIterator++ = 255;
+            }
+        }
+
+        _renderSemaphore = dispatch_semaphore_create(2);
+
+        CVReturn cvReturn = CVDisplayLinkCreateWithActiveCGDisplays(&_displayLink);
+
+   //     Assert(cvReturn == kCVReturnSuccess);
+
+        cvReturn = CVDisplayLinkSetOutputCallback(_displayLink, &OnDisplayLinkFrame, (__bridge void *)self);
+
+   //     Assert(cvReturn == kCVReturnSuccess);
+
+        cvReturn = CVDisplayLinkSetCurrentCGDisplay(_displayLink, CGMainDisplayID());
+
+        CVDisplayLinkStart(_displayLink);
+
+        NSNotificationCenter *notificationCenter = [NSNotificationCenter defaultCenter];
+
+        [notificationCenter addObserver:self
+                               selector:@selector(windowWillClose:)
+                                   name:NSWindowWillCloseNotification
+                                 object:self.window];
+    }
+
+    return self;
+}
+
+- (void)dealloc
+{
+    if (_displayLink)
+    {
+        [self stopUpdate];
+    }
+}
+
+- (void)windowWillClose:(NSNotification*)notification
+{
+    // Stop the display link when the window is closing because we will
+    // not be able to get a drawable, but the display link may continue
+    // to fire
+    if (notification.object == self.window)
+    {
+        CVDisplayLinkStop(_displayLink);
+    }
+}
+
+- (void)update
+{
+    if (_layerSizeDidUpdate)
+    {
+        // Set the metal layer to the drawable size in case orientation or size changes.
+        CGSize drawableSize = self.bounds.size;
+
+        // Scale drawableSize so that drawable is 1:1 width pixels not 1:1 to points.
+        NSScreen* screen = self.window.screen ?: [NSScreen mainScreen];
+        drawableSize.width *= screen.backingScaleFactor;
+        drawableSize.height *= screen.backingScaleFactor;
+
+        _metalLayer.drawableSize = drawableSize;
+
+        _layerSizeDidUpdate = NO;
+    }
+
+    dispatch_semaphore_wait(_renderSemaphore, DISPATCH_TIME_FOREVER);
+
+    if (!_currentDrawable)
+    {
+        _currentDrawable = [_metalLayer nextDrawable];
+    }
+
+    if (!_currentDrawable)
+    {
+        printf("ERROR: Failed to get a valid drawable.");
+        _renderPassDesc = nil;
+    }
+    else
+    {
+        if (_renderPassDesc == nil)
+        {
+            _renderPassDesc = [MTLRenderPassDescriptor renderPassDescriptor];
+        }
+
+        MTLRenderPassColorAttachmentDescriptor *colorAttachment = _renderPassDesc.colorAttachments[0];
+        colorAttachment.texture = _currentDrawable.texture;
+
+        colorAttachment.loadAction = MTLLoadActionClear;
+        colorAttachment.clearColor = MTLClearColorMake(1.0f, 0.0f, 1.0f, 1.0f);
+
+        colorAttachment.storeAction = MTLStoreActionStore;
+    }
+
+    MTLRegion region = MTLRegionMake2D(0, 0, self.frame.size.width, self.frame.size.height);
+    int rowBytes = self.frame.size.width * 4;
+    [_texture replaceRegion:region
+                mipmapLevel:0
+                  withBytes:_pixels
+                bytesPerRow:rowBytes];
+
+    id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
+
+    if (_renderPassDesc)
+    {
+        id<MTLRenderCommandEncoder> renderEncoder = [commandBuffer renderCommandEncoderWithDescriptor:_renderPassDesc];
+
+        [renderEncoder pushDebugGroup:@"encode quad"];
+
+        [renderEncoder setFrontFacingWinding:MTLWindingCounterClockwise];
+        [renderEncoder setRenderPipelineState:_pipelineState];
+        [renderEncoder setVertexBuffer:_vertexBuffer
+                                offset:0
+                               atIndex:0];
+        [renderEncoder setVertexBuffer:_texCoordBuffer
+                                offset:0
+                               atIndex:1];
+        [renderEncoder setFragmentTexture:_texture
+                                  atIndex:0];
+        [renderEncoder drawPrimitives:MTLPrimitiveTypeTriangle
+                          vertexStart:0
+                          vertexCount:6
+                        instanceCount:1];
+        [renderEncoder endEncoding];
+
+        [renderEncoder popDebugGroup];
+
+        [commandBuffer presentDrawable:_currentDrawable];
+    }
+
+    __block dispatch_semaphore_t blockRenderSemaphore = _renderSemaphore;
+    [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> cmdBuff){
+        dispatch_semaphore_signal(blockRenderSemaphore);
+    }];
+
+    [commandBuffer commit];
+
+    _currentDrawable = nil;
+}
+
+- (void)stopUpdate
+{
+    if (_displayLink)
+    {
+        CVDisplayLinkStop(_displayLink);
+        CVDisplayLinkRelease(_displayLink);
+    }
+}
+
 @end
 
 constexpr int uniformBufferCount = 3;
@@ -26,6 +368,10 @@ struct Object {
     unsigned char c1[4];
     unsigned char c2[4];
 };
+
+typedef struct {
+    GLKVector2 position;
+}Triangle;
 
 Object objs[C];
 VertexBuffer* vertexBuffer;
@@ -42,12 +388,12 @@ int main () {
         [window cascadeTopLeftFromPoint:NSMakePoint(20,20)];
         window.title = [[NSProcessInfo processInfo] processName];
         // Custom MTKView.
-        NSView* view = [[NSView alloc] initWithFrame:frame];
+        NSView* view = [[MyView alloc] initWithFrame:frame];
         window.contentView = view;
 
 
-        CAMetalLayer *rootLayer = [[CAMetalLayer alloc] init];
-        renderer = [[HelloMetalRenderer alloc] initWithLayer:rootLayer andView:view];
+        //CAMetalLayer *rootLayer = [[CAMetalLayer alloc] init];
+        renderer = [[HelloMetalRenderer alloc] initWithLayer:nil andView:view];
 
 
         view.needsDisplay = YES;
@@ -64,20 +410,18 @@ int main () {
 
 // The main view.
 @implementation HelloMetalRenderer {
-    CAMetalLayer *rootLayer;
+    id <MTLDevice> mtlDevice;
+    id <MTLCommandQueue> mtlCommandQueue;
+    MTLRenderPassDescriptor *mtlRenderPassDescriptor;
+    CAMetalLayer *metalLayer;
+    id <CAMetalDrawable> frameDrawable;
     NSView* _view;
-
-    id <MTLLibrary> _library;
-    id <MTLCommandQueue> _commandQueue;
-    id <MTLRenderPipelineState> _pipelineState;
-    id <MTLDepthStencilState> _depthState;
-    dispatch_semaphore_t _semaphore;
-    id <MTLBuffer> _uniformBuffers[uniformBufferCount];
-    id <MTLBuffer> _vertexBuffer;
-    MTLRenderPipelineDescriptor *pipelineDesc;
-    int uniformBufferIndex;
-    long frame;
     NSTimer* timer;
+    MTLRenderPipelineDescriptor *renderPipelineDescriptor;
+    id <MTLRenderPipelineState> renderPipelineState;
+    id <MTLBuffer> object;
+    dispatch_semaphore_t _semaphore;
+    CVDisplayLinkRef displayLink;
 }
 
 - (id)initWithLayer:(CAMetalLayer *)layer andView:(NSView*)view{
@@ -91,41 +435,47 @@ int main () {
 
 - (void)setup:(CAMetalLayer *)layer andView:(NSView*)view {
     // Set view settings.
-    rootLayer = layer;
+    CVDisplayLinkCreateWithActiveCGDisplays(&displayLink);
+    metalLayer  = view.layer;
+    mtlDevice = MTLCreateSystemDefaultDevice();
+    mtlCommandQueue = [mtlDevice newCommandQueue];
 
-    rootLayer.device = MTLCreateSystemDefaultDevice();
-    rootLayer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+    [metalLayer setDevice:mtlDevice];
+    [metalLayer setPixelFormat:MTLPixelFormatBGRA8Unorm];
+    metalLayer.framebufferOnly = YES;
+    [metalLayer setFrame:_view.layer.frame];
 
-    rootLayer.framebufferOnly = true;
-    rootLayer.frame = view.layer.frame;
-    rootLayer.backgroundColor = [[NSColor whiteColor] CGColor];
-    rootLayer.bounds = [view bounds];
-    rootLayer.cornerRadius = 10.0;
-    rootLayer.borderColor = [[NSColor redColor] CGColor];
-    rootLayer.borderWidth = 10.0;
-    rootLayer.shadowOpacity = 1.0;
-    rootLayer.shadowRadius = 10.0;
-    view.layer = rootLayer;
-    [view setBackgroundColor:nil];
-    [view setWantsLayer:YES];
+    [_view.layer addSublayer:metalLayer];
 
+    [_view setOpaque:YES];
+    [_view setBackgroundColor:nil];
+    [_view setWantsLayer:YES];
 
     // Load shaders.
     NSError *error = nil;
-    id <MTLLibrary> _library = [rootLayer.device newLibraryWithFile: @"shaders.metallib" error:&error];
+    id <MTLLibrary> _library = [mtlDevice newLibraryWithFile: @"shaders.metallib" error:&error];
     if (!_library) {
         NSLog(@"Failed to load library. error %@", error);
         exit(0);
     }
-    id <MTLFunction> vertFunc = [_library newFunctionWithName:@"vert"];
-    id <MTLFunction> fragFunc = [_library newFunctionWithName:@"frag"];
 
     // Create depth state.
     MTLDepthStencilDescriptor *depthDesc = [MTLDepthStencilDescriptor new];
     depthDesc.depthCompareFunction = MTLCompareFunctionLess;
     depthDesc.depthWriteEnabled = YES;
-    _depthState = [rootLayer.device newDepthStencilStateWithDescriptor:depthDesc];
 
+
+    // Create a reusable pipeline
+    renderPipelineDescriptor = [MTLRenderPipelineDescriptor new];
+    renderPipelineDescriptor.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+
+    renderPipelineDescriptor.vertexFunction = [_library newFunctionWithName:@"vert"];
+    renderPipelineDescriptor.fragmentFunction = [_library newFunctionWithName:@"frag"];
+    renderPipelineState = [mtlDevice newRenderPipelineStateWithDescriptor:renderPipelineDescriptor error: nil];
+
+    Triangle triangle[3] = { { -.5f, 0.0f }, { 0.5f, 0.0f }, { 0.0f, 0.5f } };
+
+    object = [mtlDevice newBufferWithBytes:&triangle length:sizeof(Triangle[3]) options:MTLResourceOptionCPUCacheModeDefault];
     // Create vertex descriptor.
     MTLVertexDescriptor *vertDesc = [MTLVertexDescriptor new];
     vertDesc.attributes[VertexAttributePosition].format = MTLVertexFormatFloat3;
@@ -137,186 +487,65 @@ int main () {
     vertDesc.layouts[MeshVertexBuffer].stride = sizeof(Vertex);
     vertDesc.layouts[MeshVertexBuffer].stepRate = 1;
     vertDesc.layouts[MeshVertexBuffer].stepFunction = MTLVertexStepFunctionPerVertex;
-
-    // Create pipeline state.
-    pipelineDesc = [MTLRenderPipelineDescriptor new];
-    pipelineDesc.sampleCount = 1;
-    pipelineDesc.vertexFunction = vertFunc;
-    pipelineDesc.fragmentFunction = fragFunc;
-    pipelineDesc.vertexDescriptor = vertDesc;
-    pipelineDesc.colorAttachments[0].pixelFormat = rootLayer.pixelFormat;
-   // pipelineDesc.depthAttachmentPixelFormat = rootLayer.depthStencilPixelFormat;
-    //pipelineDesc.stencilAttachmentPixelFormat = self.depthStencilPixelFormat;
-    _pipelineState = [rootLayer.device  newRenderPipelineStateWithDescriptor:pipelineDesc error:&error];
-    if (!_pipelineState) {
-        NSLog(@"Failed to create pipeline state, error %@", error);
-        exit(0);
-    }
-    srand (time(NULL));
-    // Create vertices.
-
-    vertexBuffer = new VertexBuffer(N*3*C);
-    vertexBuffer->allocate(N*3*C);
-    for (int j = 0; j < C; j++) {
-        objs[j].s = j*N*3;
-        objs[j].n = N*3;
-        objs[j].verts = vertexBuffer->getBuffer();
-        objs[j].c1[0] = rand()%256;
-        objs[j].c1[1] = rand()%256;
-        objs[j].c1[2] = rand()%256;
-        objs[j].c1[3] = rand()%256;
-
-        objs[j].c2[0] = rand()%256;
-        objs[j].c2[1] = rand()%256;
-        objs[j].c2[2] = rand()%256;
-        objs[j].c2[3] = rand()%256;
-
-        for (int i = 0; i < N; i++) {
-            objs[j].verts[objs[j].s + i * 3].position[0] =
-                    std::cos(i * (2.0 * M_PI) / N) * ((float) R / W);
-            objs[j].verts[objs[j].s + i * 3].position[1] =
-                    std::sin(i * (2.0 * M_PI) / N) * ((float) R / H);
-            objs[j].verts[objs[j].s + i * 3].position[2] = 0;
-            objs[j].verts[objs[j].s + i * 3 + 1].position[0] =
-                    std::cos((i + 1) * (2.0 * M_PI) / N) * ((float) R / W);
-            objs[j].verts[objs[j].s + i * 3 + 1].position[1] =
-                    std::sin((i + 1) * (2.0 * M_PI) / N) * ((float) R / H);
-            objs[j].verts[objs[j].s + i * 3 + 1].position[2] = 0;
-            objs[j].verts[objs[j].s + i * 3 + 2].position[0] = 0;
-            objs[j].verts[objs[j].s + i * 3 + 2].position[1] = 0;
-            objs[j].verts[objs[j].s + i * 3 + 2].position[2] = 0;
-
-            objs[j].verts[objs[j].s + i * 3].color[0] = objs[j].c1[0];
-            objs[j].verts[objs[j].s + i * 3].color[1] = objs[j].c1[1];
-            objs[j].verts[objs[j].s + i * 3].color[2] = objs[j].c1[2];
-            objs[j].verts[objs[j].s + i * 3].color[3] = objs[j].c1[3];
-            objs[j].verts[objs[j].s + i * 3 + 1].color[0] = objs[j].c1[0];
-            objs[j].verts[objs[j].s + i * 3 + 1].color[1] = objs[j].c1[1];
-            objs[j].verts[objs[j].s + i * 3 + 1].color[2] = objs[j].c1[2];
-            objs[j].verts[objs[j].s + i * 3 + 1].color[3] = objs[j].c1[3];
-            objs[j].verts[objs[j].s + i * 3 + 2].color[0] = objs[j].c2[0];
-            objs[j].verts[objs[j].s + i * 3 + 2].color[1] = objs[j].c2[1];
-            objs[j].verts[objs[j].s + i * 3 + 2].color[2] = objs[j].c2[2];
-            objs[j].verts[objs[j].s + i * 3 + 2].color[3] = objs[j].c2[3];
-        }
-        objs[j].ox = rand()%(2*W-2*R) - W + R;
-        objs[j].oy = rand()%(2*H-2*R) - H + R;
-        objs[j].vx = rand()%20 - 10;
-        objs[j].vy = rand()%20 - 10;
-    }
-
-    _vertexBuffer = [rootLayer.device  newBufferWithBytes:vertexBuffer->getBuffer()
-                                                   length:vertexBuffer->getSize()*sizeof(Vertex)
-                                                  options:
-                                                          MTLResourceCPUCacheModeDefaultCache];
-    // Create uniform buffers.
-    for (int i = 0; i < uniformBufferCount; i++) {
-        _uniformBuffers[i] = [rootLayer.device newBufferWithLength:sizeof(FrameUniforms)
-                                                           options:MTLResourceCPUCacheModeWriteCombined];
-    }
-    // frame = 0;
-
-    // Create semaphore for each uniform buffer.
+    CVDisplayLinkSetOutputCallback(displayLink, &MyDisplayLinkCallback, self);
     _semaphore = dispatch_semaphore_create(uniformBufferCount);
-    uniformBufferIndex = 0;
 
-    // Create command queue
-    _commandQueue = [rootLayer.device newCommandQueue];
-
-    timer = [NSTimer scheduledTimerWithTimeInterval:1
+/*    timer = [NSTimer scheduledTimerWithTimeInterval:1
                                              target:self
                                            selector:@selector(render)
                                            userInfo:nil
                                             repeats:YES];
-
+*/
+    CVDisplayLinkStart(displayLink);
 }
 
--(void) render
-{
+-(void) render {
     NSLog(@"aaaa\n");
-    // Wait for an available uniform buffer.
-    dispatch_semaphore_wait(_semaphore, DISPATCH_TIME_FOREVER);
+    @autoreleasepool {
+        dispatch_semaphore_wait(_semaphore, DISPATCH_TIME_FOREVER);
 
-    // Animation.
-    frame++;
-    simd::float4x4 rot(simd::float4{1, 0, 0, 0},
-                       simd::float4{0, 1, 0, 0},
-                       simd::float4{0, 0, 1, 0},
-                       simd::float4{0, 0, 0, 1});
+        id <MTLCommandBuffer> mtlCommandBuffer = [mtlCommandQueue commandBuffer];
 
-    for (int j = 0; j < C; j++) {
-        if (objs[j].ox + objs[j].vx > W - R || objs[j].ox + objs[j].vx < R - W)
-            objs[j].vx = -objs[j].vx;
+        if (frameDrawable = [metalLayer nextDrawable]) {
+            if (!mtlRenderPassDescriptor)
+                mtlRenderPassDescriptor = [MTLRenderPassDescriptor new];
 
-        if (objs[j].oy + objs[j].vy > H - R || objs[j].oy + objs[j].vy < R - H)
-            objs[j].vy = -objs[j].vy;
+            mtlRenderPassDescriptor.colorAttachments[0].texture = frameDrawable.texture;
+            mtlRenderPassDescriptor.colorAttachments[0].loadAction = MTLLoadActionClear;
+            mtlRenderPassDescriptor.colorAttachments[0].clearColor = MTLClearColorMake(0.75, 0.25, 1.0, 1.0);
+            mtlRenderPassDescriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
 
-        objs[j].ox += objs[j].vx;
-        objs[j].oy += objs[j].vy;
-
-        Vertex *v = static_cast<Vertex *>([_vertexBuffer contents]);
-        for (int i = 0; i < N; i++) {
-            v[i * 3 + objs[j].s].position[0] =
-                    std::cos(i * (2.0 * M_PI) / N) * ((float) R / W) + objs[j].ox / W;
-            v[i * 3 + objs[j].s].position[1] =
-                    std::sin(i * (2.0 * M_PI) / N) * ((float) R / H) + objs[j].oy / H;
-            v[i * 3 + objs[j].s].position[2] = 0;
-            v[i * 3 + 1 + objs[j].s].position[0] =
-                    std::cos((i + 1) * (2.0 * M_PI) / N) * ((float) R / W) +
-                    objs[j].ox / W;
-            v[i * 3 + 1 + objs[j].s].position[1] =
-                    std::sin((i + 1) * (2.0 * M_PI) / N) * ((float) R / H) +
-                    objs[j].oy / H;
-            v[i * 3 + 1 + objs[j].s].position[2] = 0;
-            v[i * 3 + 2 + objs[j].s].position[0] = 0 + objs[j].ox / W;
-            v[i * 3 + 2 + objs[j].s].position[1] = 0 + objs[j].oy / H;
-            v[i * 3 + 2 + objs[j].s].position[2] = 0;
-
-            v[i * 3 + objs[j].s].color[0] = objs[j].c1[0];;
-            v[i * 3 + objs[j].s].color[1] = objs[j].c1[1];;
-            v[i * 3 + objs[j].s].color[2] = objs[j].c1[2];;
-            v[i * 3 + objs[j].s].color[3] = objs[j].c1[3];;
-            v[i * 3 + 1 + objs[j].s].color[0] = objs[j].c1[0];;
-            v[i * 3 + 1 + objs[j].s].color[1] = objs[j].c1[1];;
-            v[i * 3 + 1 + objs[j].s].color[2] = objs[j].c1[2];;
-            v[i * 3 + 1 + objs[j].s].color[3] = objs[j].c1[3];;
-            v[i * 3 + 2 + objs[j].s].color[0] = objs[j].c2[0];;
-            v[i * 3 + 2 + objs[j].s].color[1] = objs[j].c2[1];;
-            v[i * 3 + 2 + objs[j].s].color[2] = objs[j].c2[2];;
-            v[i * 3 + 2 + objs[j].s].color[3] = objs[j].c2[3];;
+            id <MTLRenderCommandEncoder> renderCommand = [mtlCommandBuffer renderCommandEncoderWithDescriptor:mtlRenderPassDescriptor];
+            // Draw objects here
+            // set MTLRenderPipelineState..
+            [renderCommand endEncoding];
+            __block dispatch_semaphore_t semaphore = _semaphore;
+            [mtlCommandBuffer addCompletedHandler:^(id <MTLCommandBuffer> buffer) {
+                dispatch_semaphore_signal(semaphore);
+            }];
+            [mtlCommandBuffer presentDrawable:frameDrawable];
+            [mtlCommandBuffer commit];
+            mtlRenderPassDescriptor = nil;
+            frameDrawable = nil;
         }
     }
-    [_vertexBuffer didModifyRange:NSMakeRange(0, sizeof(Vertex)*N*3*C)];
-
-    // Update the current uniform buffer.
-    uniformBufferIndex = (uniformBufferIndex + 1) % uniformBufferCount;
-    FrameUniforms *uniforms = (FrameUniforms *)[_uniformBuffers[uniformBufferIndex] contents];
-    uniforms->projectionViewModel = rot;
-
-    // Create a command buffer.
-    id <MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
-
-    // Encode render command.
-    id <MTLRenderCommandEncoder> encoder =
-            [commandBuffer renderCommandEncoderWithDescriptor:[MTLRenderPassDescriptor renderPassDescriptor]];
-
-    [encoder setViewport:{0, 0, rootLayer.drawableSize.width, rootLayer.drawableSize.height, 0, 1}];
-    [encoder setDepthStencilState:_depthState];
-    [encoder setRenderPipelineState:_pipelineState];
-    [encoder setVertexBuffer:_uniformBuffers[uniformBufferIndex]
-                      offset:0 atIndex:FrameUniformBuffer];
-
-    [encoder setVertexBuffer:_vertexBuffer offset:0 atIndex:MeshVertexBuffer];
-    [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:N*3*C];
-    [encoder endEncoding];
-
-    // Set callback for semaphore.
-    __block dispatch_semaphore_t semaphore = _semaphore;
-    [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
-        dispatch_semaphore_signal(semaphore);
-    }];
-    [commandBuffer presentDrawable:[rootLayer nextDrawable]];
-    [commandBuffer commit];
 }
 
+// This is the renderer output callback function
+static CVReturn MyDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTimeStamp* now, const CVTimeStamp* outputTime, CVOptionFlags flagsIn, CVOptionFlags* flagsOut, void* displayLinkContext)
+{
+    [(HelloMetalRenderer*)displayLinkContext render];
+    return kCVReturnSuccess;
+}
+
+
+@end
+
+@implementation MyView {
+
+}
+
+- (CALayer *)makeBackingLayer {
+    return [CAMetalLayer layer];
+}
 @end
