@@ -9,14 +9,20 @@ execute_process(COMMAND xcode-select -p
 
 set(xcode_usr_bin ${xcode_path}/Platforms/MacOSX.platform/usr/bin)
 FIND_LIBRARY(APPKIT_LIBRARY AppKit)
-set(SOURCE_FILES src/camain.mm src/RenderObject.cpp src/RenderObject.h src/VertexBuffer.cpp src/VertexBuffer.h src/MetalVertexBuffer.mm src/MetalVertexBuffer.h)
-add_executable(metal ${SOURCE_FILES} ${PROJECT_BINARY_DIR}/shaders.metallib_)
+set(SOURCE_FILES  src/RenderObject.cpp src/RenderObject.h src/VertexBuffer.cpp src/VertexBuffer.h src/MetalVertexBuffer.mm src/MetalVertexBuffer.h)
+add_executable(metal ${SOURCE_FILES} src/main.mm ${PROJECT_BINARY_DIR}/shaders.metallib_)
+add_executable(cametal ${SOURCE_FILES} src/camain.mm ${PROJECT_BINARY_DIR}/shaders.metallib_)
 
 target_link_libraries(metal ${APPKIT_LIBRARY})
 target_link_libraries(metal "-framework Cocoa")
-target_link_libraries(metal "-framework QuartzCore")
 target_link_libraries(metal "-framework Metal")
 target_link_libraries(metal "-framework MetalKit")
+
+target_link_libraries(cametal ${APPKIT_LIBRARY})
+target_link_libraries(cametal "-framework Cocoa")
+target_link_libraries(cametal "-framework Metal")
+target_link_libraries(cametal "-framework MetalKit")
+target_link_libraries(cametal "-framework QuartzCore")
 add_custom_command(
         OUTPUT ${PROJECT_BINARY_DIR}/shaders.metallib_
         WORKING_DIR ${PROJECT_BINARY_DIR}
