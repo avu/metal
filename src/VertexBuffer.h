@@ -8,6 +8,7 @@
 struct Vertex {
     float position[3];
     unsigned char color[4];
+    float texpos[2];
 };
 
 class VertexBuffer {

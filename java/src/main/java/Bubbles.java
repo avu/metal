@@ -47,9 +47,10 @@ public class Bubbles
                         for (int i = 0; i < n; i++) {
                             RadialGradientPaint gp = new RadialGradientPaint(
                                     bx[i], by[i], r, fr[i],  bc[i]);
-                            g2d.setPaint(gp);
-                          //g2d.setColor(bc[i][0]);
+                           // g2d.setPaint(gp);
+                          g2d.setColor(bc[i][0]);
                             g.fillOval((int)(bx[i] - r), (int)(by[i] - r), (int)(2*r), (int)(2*r));
+                          //  g.fillRect((int)(bx[i] - r), (int)(by[i] - r), (int)(2*r), (int)(2*r));
                         }
                         time = System.nanoTime() - time;
                         fps = 1.0e9 / time;
@@ -67,7 +68,7 @@ public class Bubbles
                 f.setVisible(true);
             }
         });
-        n = 1000;
+        n = 10;
         bx = new float[n];
         by = new float[n];
         vx = new float[n];

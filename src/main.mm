@@ -66,6 +66,7 @@ Object objs[C];
     dispatch_semaphore_t _semaphore;
     id <MTLBuffer> _uniformBuffers[uniformBufferCount];
     id <MTLBuffer> _vertexBuffer;
+    id <MTLTexture> _texture;
     int uniformBufferIndex;
     long frame;
 }
@@ -77,6 +78,56 @@ Object objs[C];
         [self setup];
     }
     return self;
+}
+
++ (uint8_t *)dataForImage:(NSImage *)image
+{
+// create the image somehow, load from file, draw into it...
+    CGImageSourceRef source;
+
+    source = CGImageSourceCreateWithData((CFDataRef)[image TIFFRepresentation], NULL);
+    CGImageRef imageRef =  CGImageSourceCreateImageAtIndex(source, 0, NULL);
+
+
+    // Create a suitable bitmap context for extracting the bits of the image
+    const NSUInteger width = CGImageGetWidth(imageRef);
+    const NSUInteger height = CGImageGetHeight(imageRef);
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    uint8_t *rawData = (uint8_t *)calloc(height * width * 4, sizeof(uint8_t));
+    const NSUInteger bytesPerPixel = 4;
+    const NSUInteger bytesPerRow = bytesPerPixel * width;
+    const NSUInteger bitsPerComponent = 8;
+    CGContextRef context = CGBitmapContextCreate(rawData, width, height,
+                                                 bitsPerComponent, bytesPerRow, colorSpace,
+                                                 kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGColorSpaceRelease(colorSpace);
+
+    CGContextDrawImage(context, CGRectMake(0, 0, width, height), imageRef);
+    CGContextRelease(context);
+
+    return rawData;
+}
+
++ (id<MTLTexture>)texture2DWithImageNamed:(NSString *)imageName device:(id<MTLDevice>)device
+{
+    NSImage *image = [NSImage imageNamed:imageName];
+    CGSize imageSize = CGSizeMake(image.size.width, image.size.height);
+    const NSUInteger bytesPerPixel = 4;
+    const NSUInteger bytesPerRow = bytesPerPixel * imageSize.width;
+    uint8_t *imageData = [self dataForImage:image];
+
+    MTLTextureDescriptor *textureDescriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+                                                                                                 width:imageSize.width
+                                                                                                height:imageSize.height
+                                                                                             mipmapped:NO];
+    id<MTLTexture> texture = [device newTextureWithDescriptor:textureDescriptor];
+
+    MTLRegion region = MTLRegionMake2D(0, 0, imageSize.width, imageSize.height);
+    [texture replaceRegion:region mipmapLevel:0 withBytes:imageData bytesPerRow:bytesPerRow];
+
+    free(imageData);
+
+    return texture;
 }
 
 - (void)setup {
@@ -108,6 +159,10 @@ Object objs[C];
     vertDesc.attributes[VertexAttributeColor].format = MTLVertexFormatUChar4;
     vertDesc.attributes[VertexAttributeColor].offset = sizeof(Vertex::position);
     vertDesc.attributes[VertexAttributeColor].bufferIndex = MeshVertexBuffer;
+    vertDesc.attributes[VertexAttributeTexPos].format = MTLVertexFormatFloat2;
+    vertDesc.attributes[VertexAttributeTexPos].offset = sizeof(Vertex::position) + sizeof(Vertex::color);
+    vertDesc.attributes[VertexAttributeTexPos].bufferIndex = MeshVertexBuffer;
+
     vertDesc.layouts[MeshVertexBuffer].stride = sizeof(Vertex);
     vertDesc.layouts[MeshVertexBuffer].stepRate = 1;
     vertDesc.layouts[MeshVertexBuffer].stepFunction = MTLVertexStepFunctionPerVertex;
@@ -160,6 +215,18 @@ Object objs[C];
             objs[j].verts[objs[j].s + i * 3 + 2].position[1] = 0;
             objs[j].verts[objs[j].s + i * 3 + 2].position[2] = 0;
 
+            objs[j].verts[objs[j].s + i * 3].texpos[0] =
+                    std::cos(i * (2.0 * M_PI) / N);
+            objs[j].verts[objs[j].s + i * 3].texpos[1] =
+                    std::sin(i * (2.0 * M_PI) / N);
+            objs[j].verts[objs[j].s + i * 3 + 1].texpos[0] =
+                    std::cos((i + 1) * (2.0 * M_PI) / N) * ((float) R / W);
+            objs[j].verts[objs[j].s + i * 3 + 1].texpos[1] =
+                    std::sin((i + 1) * (2.0 * M_PI) / N) * ((float) R / H);
+            objs[j].verts[objs[j].s + i * 3 + 2].texpos[0] = 0;
+            objs[j].verts[objs[j].s + i * 3 + 2].texpos[1] = 0;
+
+
             objs[j].verts[objs[j].s + i * 3].color[0] = objs[j].c1[0];
             objs[j].verts[objs[j].s + i * 3].color[1] = objs[j].c1[1];
             objs[j].verts[objs[j].s + i * 3].color[2] = objs[j].c1[2];
@@ -199,6 +266,8 @@ Object objs[C];
     //self.paused = YES;
     //self.enableSetNeedsDisplay = NO;
     //[self draw];
+
+    _texture = [HelloMetalView texture2DWithImageNamed:@"earth.png" device:self.device];
 }
 
 - (void)drawRect:(CGRect)rect {
@@ -274,6 +343,7 @@ Object objs[C];
                       offset:0 atIndex:FrameUniformBuffer];
 
     [encoder setVertexBuffer:_vertexBuffer offset:0 atIndex:MeshVertexBuffer];
+    [encoder setFragmentTexture:_texture atIndex:1];
     [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:N*3*C];
     [encoder endEncoding];
 

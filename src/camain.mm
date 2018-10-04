@@ -47,7 +47,9 @@ Object objs[C];
     id<MTLBuffer>  			   _vertexBuffer;
     id<CAMetalDrawable> 	   _currentDrawable;
     id <MTLBuffer> _uniformBuffer;
-
+    id<MTLTexture> _earthTxt;
+    id<MTLTexture> _moonTxt;
+    id<MTLDepthStencilState> _depthState;
     BOOL 				        _layerSizeDidUpdate;
     char 					   *_pixels;
 }
@@ -106,7 +108,7 @@ static CVReturn OnDisplayLinkFrame(CVDisplayLinkRef displayLink,
             return nil;
         }
 
-        id<MTLFunction> fragmentProgram = [_shaderLibrary newFunctionWithName:@"frag"];
+        id<MTLFunction> fragmentProgram = [_shaderLibrary newFunctionWithName:@"frag_txt"];
         if (!fragmentProgram)
         {
             printf("ERROR: Couldn't load fragment function from default library.");
@@ -130,6 +132,26 @@ static CVReturn OnDisplayLinkFrame(CVDisplayLinkRef displayLink,
         _uniformBuffer = [_device newBufferWithLength:sizeof(FrameUniforms)
                                  options:MTLResourceCPUCacheModeWriteCombined];
         // Create vertex descriptor.
+
+        NSDictionary *opt = [NSDictionary dictionaryWithObject:@(YES) forKey:MTKTextureLoaderOptionOrigin];
+
+        MTKTextureLoader* txtLoader = [[MTKTextureLoader alloc] initWithDevice:_device];
+        NSError *err;
+        _earthTxt = [txtLoader newTextureWithContentsOfURL: [NSURL fileURLWithPath:@"earth.png"] options: opt error:&err];
+        _moonTxt = [txtLoader newTextureWithContentsOfURL: [NSURL fileURLWithPath:@"moon.png"] options: opt error:&err];
+
+        MTLDepthStencilDescriptor *depthDescriptor = [[MTLDepthStencilDescriptor alloc] init];
+        depthDescriptor.depthWriteEnabled = YES;
+        depthDescriptor.depthCompareFunction = MTLCompareFunctionLess;
+        _depthState = [_device newDepthStencilStateWithDescriptor:depthDescriptor];
+
+//        MTLTextureDescriptor *TextureDescriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat: MTLPixelFormatRGBA8Unorm width: 2 height: 2 mipmapped: NO];
+//        _texture = [_device newTextureWithDescriptor: TextureDescriptor];
+//        [_texture replaceRegion: MTLRegionMake2D(0, 0, 2, 2) mipmapLevel: 0 withBytes: (uint8_t[]){
+//                255,0,0,255,    0,255,0,255,
+//                0,0,255,255,    0,0,0,255
+//        } bytesPerRow: 8];
+
         MTLVertexDescriptor *vertDesc = [MTLVertexDescriptor new];
         vertDesc.attributes[VertexAttributePosition].format = MTLVertexFormatFloat3;
         vertDesc.attributes[VertexAttributePosition].offset = 0;
@@ -137,11 +159,15 @@ static CVReturn OnDisplayLinkFrame(CVDisplayLinkRef displayLink,
         vertDesc.attributes[VertexAttributeColor].format = MTLVertexFormatUChar4;
         vertDesc.attributes[VertexAttributeColor].offset = sizeof(Vertex::position);
         vertDesc.attributes[VertexAttributeColor].bufferIndex = MeshVertexBuffer;
+        vertDesc.attributes[VertexAttributeTexPos].format = MTLVertexFormatFloat2;
+        vertDesc.attributes[VertexAttributeTexPos].offset = sizeof(Vertex::position) + sizeof(Vertex::color);
+        vertDesc.attributes[VertexAttributeTexPos].bufferIndex = MeshVertexBuffer;
+
         vertDesc.layouts[MeshVertexBuffer].stride = sizeof(Vertex);
         vertDesc.layouts[MeshVertexBuffer].stepRate = 1;
         vertDesc.layouts[MeshVertexBuffer].stepFunction = MTLVertexStepFunctionPerVertex;
 
-       // pipelineStateDesc.depthAttachmentPixelFormat      = MTLPixelFormatInvalid;
+        pipelineStateDesc.depthAttachmentPixelFormat      = MTLPixelFormatDepth32Float;
        // pipelineStateDesc.stencilAttachmentPixelFormat    = MTLPixelFormatInvalid;
         pipelineStateDesc.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
 
@@ -175,20 +201,34 @@ static CVReturn OnDisplayLinkFrame(CVDisplayLinkRef displayLink,
             objs[j].c2[1] = rand()%256;
             objs[j].c2[2] = rand()%256;
             objs[j].c2[3] = rand()%256;
-
             for (int i = 0; i < N; i++) {
                 objs[j].verts[objs[j].s + i * 3].position[0] =
                         std::cos(i * (2.0 * M_PI) / N) * ((float) R / W);
                 objs[j].verts[objs[j].s + i * 3].position[1] =
                         std::sin(i * (2.0 * M_PI) / N) * ((float) R / H);
                 objs[j].verts[objs[j].s + i * 3].position[2] = 0;
+                objs[j].verts[objs[j].s + i * 3].texpos[0] =
+                        (std::cos(i * (2.0 * M_PI) / N) + 1.2f)* 0.4f;
+                objs[j].verts[objs[j].s + i * 3].texpos[1] =
+                        (std::sin(i * (2.0 * M_PI) / N) + 1.2f) * 0.4f;
+
                 objs[j].verts[objs[j].s + i * 3 + 1].position[0] =
                         std::cos((i + 1) * (2.0 * M_PI) / N) * ((float) R / W);
                 objs[j].verts[objs[j].s + i * 3 + 1].position[1] =
                         std::sin((i + 1) * (2.0 * M_PI) / N) * ((float) R / H);
+                objs[j].verts[objs[j].s + i * 3 + 1].texpos[0] =
+                        (std::cos((i + 1) * (2.0 * M_PI) / N)+ 1.2f)*0.4f;
+                objs[j].verts[objs[j].s + i * 3 + 1].texpos[1] =
+                        (std::sin((i + 1) * (2.0 * M_PI) / N)+ 1.2f)*0.4f;
+
                 objs[j].verts[objs[j].s + i * 3 + 1].position[2] = 0;
+
                 objs[j].verts[objs[j].s + i * 3 + 2].position[0] = 0;
                 objs[j].verts[objs[j].s + i * 3 + 2].position[1] = 0;
+
+                objs[j].verts[objs[j].s + i * 3 + 2].texpos[0] = 0.5f;
+                objs[j].verts[objs[j].s + i * 3 + 2].texpos[1] = 0.5f;
+
                 objs[j].verts[objs[j].s + i * 3 + 2].position[2] = 0;
 
                 objs[j].verts[objs[j].s + i * 3].color[0] = objs[j].c1[0];
@@ -335,17 +375,17 @@ static CVReturn OnDisplayLinkFrame(CVDisplayLinkRef displayLink,
                         std::cos(i * (2.0 * M_PI) / N) * ((float) R / W) + objs[j].ox / W;
                 v[i * 3 + objs[j].s].position[1] =
                         std::sin(i * (2.0 * M_PI) / N) * ((float) R / H) + objs[j].oy / H;
-                v[i * 3 + objs[j].s].position[2] = 0;
+                v[i * 3 + objs[j].s].position[2] = j % 2;;
                 v[i * 3 + 1 + objs[j].s].position[0] =
                         std::cos((i + 1) * (2.0 * M_PI) / N) * ((float) R / W) +
                         objs[j].ox / W;
                 v[i * 3 + 1 + objs[j].s].position[1] =
                         std::sin((i + 1) * (2.0 * M_PI) / N) * ((float) R / H) +
                         objs[j].oy / H;
-                v[i * 3 + 1 + objs[j].s].position[2] = 0;
+                v[i * 3 + 1 + objs[j].s].position[2] = j % 2;
                 v[i * 3 + 2 + objs[j].s].position[0] = 0 + objs[j].ox / W;
                 v[i * 3 + 2 + objs[j].s].position[1] = 0 + objs[j].oy / H;
-                v[i * 3 + 2 + objs[j].s].position[2] = 0;
+                v[i * 3 + 2 + objs[j].s].position[2] = j % 2;
 
                 v[i * 3 + objs[j].s].color[0] = objs[j].c1[0];;
                 v[i * 3 + objs[j].s].color[1] = objs[j].c1[1];;
@@ -371,6 +411,7 @@ static CVReturn OnDisplayLinkFrame(CVDisplayLinkRef displayLink,
         // Encode render command.
         id <MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:_renderPassDesc];
         [encoder pushDebugGroup:@"encode balls"];
+        [encoder setDepthStencilState:_depthState];
         [encoder setFrontFacingWinding:MTLWindingCounterClockwise];
         [encoder setRenderPipelineState:_pipelineState];
         [encoder setVertexBuffer:_vertexBuffer
@@ -379,11 +420,31 @@ static CVReturn OnDisplayLinkFrame(CVDisplayLinkRef displayLink,
         [encoder setVertexBuffer:_uniformBuffer
                           offset:0 atIndex:FrameUniformBuffer];
         // [encoder setViewport:{0, 0, 800, 600, 0, 1}];
-        [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:N * 3 * C];
+
+        [encoder setFragmentTexture: _earthTxt atIndex: 0];
+
+        [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:(N * 3 * C / 2)];
+//        [encoder endEncoding];
+
+  //      [encoder popDebugGroup];
+
+    //    encoder = [commandBuffer renderCommandEncoderWithDescriptor:_renderPassDesc];
+      //  [encoder pushDebugGroup:@"encode balls"];
+        [encoder setFrontFacingWinding:MTLWindingCounterClockwise];
+        [encoder setRenderPipelineState:_pipelineState];
+        [encoder setVertexBuffer:_vertexBuffer
+                          offset:0
+                         atIndex:MeshVertexBuffer];
+        [encoder setVertexBuffer:_uniformBuffer
+                          offset:0 atIndex:FrameUniformBuffer];
+        // [encoder setViewport:{0, 0, 800, 600, 0, 1}];
+
+        [encoder setFragmentTexture: _moonTxt atIndex: 0];
+
+        [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:(N * 3 * C / 2) vertexCount:(N * 3 * C / 2)];
         [encoder endEncoding];
 
         [encoder popDebugGroup];
-
 
         __block dispatch_semaphore_t blockRenderSemaphore = _renderSemaphore;
         [commandBuffer addCompletedHandler:^(id <MTLCommandBuffer> cmdBuff) {

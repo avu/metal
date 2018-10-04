@@ -31,6 +31,8 @@ add_custom_command(
         COMMAND ${xcode_usr_bin}/metal-ar r shaders.metal-ar shaders.air
         COMMAND ${xcode_usr_bin}/metallib -o shaders.metallib_ shaders.metal-ar
         COMMAND ${CMAKE_COMMAND} -E copy shaders.metallib_ shaders.metallib
+        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/src/earth.png ${PROJECT_BINARY_DIR}/earth.png
+        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/src/moon.png ${PROJECT_BINARY_DIR}/moon.png
         MAIN_DEPENDENCY src/shaders.metal
         VERBATIM
 )
