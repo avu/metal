@@ -140,10 +140,20 @@ static CVReturn OnDisplayLinkFrame(CVDisplayLinkRef displayLink,
         _earthTxt = [txtLoader newTextureWithContentsOfURL: [NSURL fileURLWithPath:@"earth.png"] options: opt error:&err];
         _moonTxt = [txtLoader newTextureWithContentsOfURL: [NSURL fileURLWithPath:@"moon.png"] options: opt error:&err];
 
-        MTLDepthStencilDescriptor *depthDescriptor = [[MTLDepthStencilDescriptor alloc] init];
-        depthDescriptor.depthWriteEnabled = YES;
-        depthDescriptor.depthCompareFunction = MTLCompareFunctionLess;
-        _depthState = [_device newDepthStencilStateWithDescriptor:depthDescriptor];
+      //  MTLDepthStencilDescriptor *depthDescriptor = [[MTLDepthStencilDescriptor alloc] init];
+        MTLDepthStencilDescriptor *depthStateDesc = [[MTLDepthStencilDescriptor alloc] init];
+        depthStateDesc.depthCompareFunction = MTLCompareFunctionLess;
+        depthStateDesc.depthWriteEnabled = YES;
+        depthStateDesc.frontFaceStencil.stencilCompareFunction = MTLCompareFunctionAlways;
+        depthStateDesc.frontFaceStencil.depthStencilPassOperation = MTLStencilOperationZero;
+        depthStateDesc.frontFaceStencil.depthFailureOperation = MTLStencilOperationZero;
+        depthStateDesc.frontFaceStencil.writeMask = 0x00;
+        depthStateDesc.frontFaceStencil.readMask = 0x00;
+
+       // depthDescriptor.depthWriteEnabled = YES;
+       // depthDescriptor.depthCompareFunction = MTLCompareFunctionLess;
+        _depthState = [_device newDepthStencilStateWithDescriptor:depthStateDesc];
+
 
 //        MTLTextureDescriptor *TextureDescriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat: MTLPixelFormatRGBA8Unorm width: 2 height: 2 mipmapped: NO];
 //        _texture = [_device newTextureWithDescriptor: TextureDescriptor];
@@ -168,7 +178,7 @@ static CVReturn OnDisplayLinkFrame(CVDisplayLinkRef displayLink,
         vertDesc.layouts[MeshVertexBuffer].stepFunction = MTLVertexStepFunctionPerVertex;
 
         pipelineStateDesc.depthAttachmentPixelFormat      = MTLPixelFormatDepth32Float;
-       // pipelineStateDesc.stencilAttachmentPixelFormat    = MTLPixelFormatInvalid;
+
         pipelineStateDesc.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
 
         pipelineStateDesc.sampleCount      = 1;
@@ -201,27 +211,28 @@ static CVReturn OnDisplayLinkFrame(CVDisplayLinkRef displayLink,
             objs[j].c2[1] = rand()%256;
             objs[j].c2[2] = rand()%256;
             objs[j].c2[3] = rand()%256;
+            float k = (j%2)? 0.5f : 1.0f;
             for (int i = 0; i < N; i++) {
                 objs[j].verts[objs[j].s + i * 3].position[0] =
-                        std::cos(i * (2.0 * M_PI) / N) * ((float) R / W);
+                        std::cos(i * (2.0 * M_PI) / N) * ((float) R / W)*k;
                 objs[j].verts[objs[j].s + i * 3].position[1] =
-                        std::sin(i * (2.0 * M_PI) / N) * ((float) R / H);
-                objs[j].verts[objs[j].s + i * 3].position[2] = 0;
+                        std::sin(i * (2.0 * M_PI) / N) * ((float) R / H)*k;
+                objs[j].verts[objs[j].s + i * 3].position[2] = 0.5 * (j%2);
                 objs[j].verts[objs[j].s + i * 3].texpos[0] =
                         (std::cos(i * (2.0 * M_PI) / N) + 1.2f)* 0.4f;
                 objs[j].verts[objs[j].s + i * 3].texpos[1] =
                         (std::sin(i * (2.0 * M_PI) / N) + 1.2f) * 0.4f;
 
                 objs[j].verts[objs[j].s + i * 3 + 1].position[0] =
-                        std::cos((i + 1) * (2.0 * M_PI) / N) * ((float) R / W);
+                        std::cos((i + 1) * (2.0 * M_PI) / N) * ((float) R / W)*k;
                 objs[j].verts[objs[j].s + i * 3 + 1].position[1] =
-                        std::sin((i + 1) * (2.0 * M_PI) / N) * ((float) R / H);
+                        std::sin((i + 1) * (2.0 * M_PI) / N) * ((float) R / H)*k;
                 objs[j].verts[objs[j].s + i * 3 + 1].texpos[0] =
                         (std::cos((i + 1) * (2.0 * M_PI) / N)+ 1.2f)*0.4f;
                 objs[j].verts[objs[j].s + i * 3 + 1].texpos[1] =
                         (std::sin((i + 1) * (2.0 * M_PI) / N)+ 1.2f)*0.4f;
 
-                objs[j].verts[objs[j].s + i * 3 + 1].position[2] = 0;
+                objs[j].verts[objs[j].s + i * 3 + 1].position[2] = 0.5 * (j%2);
 
                 objs[j].verts[objs[j].s + i * 3 + 2].position[0] = 0;
                 objs[j].verts[objs[j].s + i * 3 + 2].position[1] = 0;
@@ -229,7 +240,7 @@ static CVReturn OnDisplayLinkFrame(CVDisplayLinkRef displayLink,
                 objs[j].verts[objs[j].s + i * 3 + 2].texpos[0] = 0.5f;
                 objs[j].verts[objs[j].s + i * 3 + 2].texpos[1] = 0.5f;
 
-                objs[j].verts[objs[j].s + i * 3 + 2].position[2] = 0;
+                objs[j].verts[objs[j].s + i * 3 + 2].position[2] = 0.5 * (j%2);
 
                 objs[j].verts[objs[j].s + i * 3].color[0] = objs[j].c1[0];
                 objs[j].verts[objs[j].s + i * 3].color[1] = objs[j].c1[1];
@@ -337,10 +348,22 @@ static CVReturn OnDisplayLinkFrame(CVDisplayLinkRef displayLink,
     }
     else
     {
-        if (_renderPassDesc == nil)
-        {
+        if (_renderPassDesc == nil) {
             _renderPassDesc = [MTLRenderPassDescriptor renderPassDescriptor];
         }
+
+        MTLTextureDescriptor * depthBufferDescriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float width:W height:H mipmapped:NO];
+        depthBufferDescriptor.usage = MTLTextureUsageUnknown;
+        depthBufferDescriptor.storageMode = MTLStorageModePrivate;
+        depthBufferDescriptor.sampleCount = 1;
+        depthBufferDescriptor.resourceOptions = MTLResourceStorageModePrivate;
+
+        _renderPassDesc.depthAttachment.texture = [_device newTextureWithDescriptor:depthBufferDescriptor];
+        _renderPassDesc.depthAttachment.loadAction = MTLLoadActionClear;
+        _renderPassDesc.depthAttachment.storeAction = MTLStoreActionDontCare;
+        _renderPassDesc.depthAttachment.clearDepth = 1.0;
+        //_renderPassDesc.stencilAttachment.texture = _renderPassDesc.depthAttachment.texture;
+
 
         MTLRenderPassColorAttachmentDescriptor *colorAttachment = _renderPassDesc.colorAttachments[0];
         colorAttachment.texture = _currentDrawable.texture;
@@ -370,22 +393,23 @@ static CVReturn OnDisplayLinkFrame(CVDisplayLinkRef displayLink,
             objs[j].oy += objs[j].vy;
 
             Vertex *v = static_cast<Vertex *>([_vertexBuffer contents]);
+            float k = (j%2)? 0.5f : 1.0f;
             for (int i = 0; i < N; i++) {
                 v[i * 3 + objs[j].s].position[0] =
-                        std::cos(i * (2.0 * M_PI) / N) * ((float) R / W) + objs[j].ox / W;
+                        std::cos(i * (2.0 * M_PI) / N) * ((float) R / W)*k + objs[j].ox / W;
                 v[i * 3 + objs[j].s].position[1] =
-                        std::sin(i * (2.0 * M_PI) / N) * ((float) R / H) + objs[j].oy / H;
-                v[i * 3 + objs[j].s].position[2] = j % 2;;
+                        std::sin(i * (2.0 * M_PI) / N) * ((float) R / H)*k + objs[j].oy / H;
+                v[i * 3 + objs[j].s].position[2] = 0.5 * (j%2);
                 v[i * 3 + 1 + objs[j].s].position[0] =
-                        std::cos((i + 1) * (2.0 * M_PI) / N) * ((float) R / W) +
+                        std::cos((i + 1) * (2.0 * M_PI) / N) * ((float) R / W)*k +
                         objs[j].ox / W;
                 v[i * 3 + 1 + objs[j].s].position[1] =
-                        std::sin((i + 1) * (2.0 * M_PI) / N) * ((float) R / H) +
+                        std::sin((i + 1) * (2.0 * M_PI) / N) * ((float) R / H)*k +
                         objs[j].oy / H;
-                v[i * 3 + 1 + objs[j].s].position[2] = j % 2;
+                v[i * 3 + 1 + objs[j].s].position[2] = 0.5 * (j%2);
                 v[i * 3 + 2 + objs[j].s].position[0] = 0 + objs[j].ox / W;
                 v[i * 3 + 2 + objs[j].s].position[1] = 0 + objs[j].oy / H;
-                v[i * 3 + 2 + objs[j].s].position[2] = j % 2;
+                v[i * 3 + 2 + objs[j].s].position[2] = 0.5 * (j%2);
 
                 v[i * 3 + objs[j].s].color[0] = objs[j].c1[0];;
                 v[i * 3 + objs[j].s].color[1] = objs[j].c1[1];;
@@ -412,7 +436,7 @@ static CVReturn OnDisplayLinkFrame(CVDisplayLinkRef displayLink,
         id <MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:_renderPassDesc];
         [encoder pushDebugGroup:@"encode balls"];
         [encoder setDepthStencilState:_depthState];
-        [encoder setFrontFacingWinding:MTLWindingCounterClockwise];
+       // [encoder setFrontFacingWinding:MTLWindingCounterClockwise];
         [encoder setRenderPipelineState:_pipelineState];
         [encoder setVertexBuffer:_vertexBuffer
                           offset:0
@@ -430,6 +454,7 @@ static CVReturn OnDisplayLinkFrame(CVDisplayLinkRef displayLink,
 
     //    encoder = [commandBuffer renderCommandEncoderWithDescriptor:_renderPassDesc];
       //  [encoder pushDebugGroup:@"encode balls"];
+        [encoder setDepthStencilState:_depthState];
         [encoder setFrontFacingWinding:MTLWindingCounterClockwise];
         [encoder setRenderPipelineState:_pipelineState];
         [encoder setVertexBuffer:_vertexBuffer
@@ -441,7 +466,7 @@ static CVReturn OnDisplayLinkFrame(CVDisplayLinkRef displayLink,
 
         [encoder setFragmentTexture: _moonTxt atIndex: 0];
 
-        [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:(N * 3 * C / 2) vertexCount:(N * 3 * C / 2)];
+        [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:((N * 3 * C) / 2)  vertexCount:(N * 3 * C / 2)];
         [encoder endEncoding];
 
         [encoder popDebugGroup];
